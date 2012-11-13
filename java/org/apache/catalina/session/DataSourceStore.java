@@ -707,7 +707,7 @@ public class DataSourceStore extends StoreBase implements Store {
         try {
             conn = getDataSource().getConnection();
         } catch (SQLException e) {
-            manager.getContainer().getLogger().error(sm.getString(getStoreName() + ".getConnection", dataSourceName), e);
+            manager.getContainer().getLogger().error(sm.getString(getStoreName() + ".getConnectionSQLException", dataSourceName), e);
         }
 
         return conn;
