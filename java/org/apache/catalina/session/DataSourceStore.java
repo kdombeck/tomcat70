@@ -47,6 +47,9 @@ import java.util.ArrayList;
  * serialized session objects in a database using a specified data source.  Sessions that are
  * saved are still subject to being expired based on inactivity.
  * Note that this implementation does not synchronize access to a connection.
+ *
+ * @author Viktor Khoroshiko
+ * @version $Id$
  */
 public class DataSourceStore extends StoreBase implements Store {
     /**
@@ -568,7 +571,7 @@ public class DataSourceStore extends StoreBase implements Store {
      * @param id    Session identifier of the Session to be removed
      * @param _conn open connection to be used
      */
-    private void remove(String id, Connection _conn) {
+    protected void remove(String id, Connection _conn) {
         PreparedStatement preparedRemove = null;
 
         try {
@@ -764,6 +767,8 @@ public class DataSourceStore extends StoreBase implements Store {
      */
     @Override
     protected synchronized void startInternal() throws LifecycleException {
+        super.startInternal();
+
         // initialize DataSource
         this.dataSource = getDataSource();
 
@@ -787,8 +792,6 @@ public class DataSourceStore extends StoreBase implements Store {
         // Create the load PreparedStatement string
         preparedLoadSql = "SELECT " + sessionIdCol + ", " + sessionDataCol + " FROM " + sessionTable
                 + " WHERE " + sessionIdCol + " = ? AND " + sessionAppCol + " = ?";
-
-        super.startInternal();
     }
 
     /**
