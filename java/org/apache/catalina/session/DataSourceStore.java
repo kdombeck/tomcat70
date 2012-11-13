@@ -18,18 +18,14 @@
 package org.apache.catalina.session;
 
 import org.apache.catalina.Container;
-import org.apache.catalina.Engine;
-import org.apache.catalina.Host;
 import org.apache.catalina.LifecycleException;
 import org.apache.catalina.Loader;
-import org.apache.catalina.Server;
-import org.apache.catalina.Service;
 import org.apache.catalina.Session;
 import org.apache.catalina.Store;
 import org.apache.catalina.util.CustomObjectInputStream;
-import org.apache.naming.ContextBindings;
 
 import javax.naming.Context;
+import javax.naming.InitialContext;
 import javax.naming.NamingException;
 import javax.sql.DataSource;
 import java.io.BufferedInputStream;
@@ -77,11 +73,6 @@ public class DataSourceStore extends StoreBase implements Store {
      * The name of the JNDI JDBC DataSource
      */
     protected String dataSourceName = null;
-
-    /**
-     * Context local datasource.
-     */
-    protected boolean localDataSource = false;
 
     /**
      * * DataSource to use
@@ -366,23 +357,6 @@ public class DataSourceStore extends StoreBase implements Store {
      */
     public String getDataSourceName() {
         return this.dataSourceName;
-    }
-
-    /**
-     * Set to true to cause the datasource to be looked up in the webapp JNDI
-     * Context.
-     *
-     * @param localDataSource the new flag value
-     */
-    public void setLocalDataSource(boolean localDataSource) {
-        this.localDataSource = localDataSource;
-    }
-
-    /**
-     * Return if the datasource will be looked up in the webapp JNDI Context.
-     */
-    public boolean getLocalDataSource() {
-        return localDataSource;
     }
 
     // --------------------------------------------------------- Public Methods
@@ -762,6 +736,26 @@ public class DataSourceStore extends StoreBase implements Store {
     }
 
     /**
+     * Initialize dataSource if it hasn't been initialized yet.
+     *
+     * @return <code>DataSource</code>
+     */
+    protected DataSource getDataSource() {
+        if (dataSource == null) {
+            Context initCtx;
+            try {
+                initCtx = new InitialContext();
+                Context envCtx = (Context) initCtx.lookup("java:comp/env");
+                this.dataSource = (DataSource) envCtx.lookup(this.dataSourceName);
+            } catch (NamingException e) {
+                manager.getContainer().getLogger().error(sm.getString(getStoreName() + ".wrongDataSource", dataSourceName), e);
+            }
+        }
+
+        return dataSource;
+    }
+
+    /**
      * Start this component and implement the requirements
      * of {@link org.apache.catalina.util.LifecycleBase#startInternal()}.
      *
@@ -809,52 +803,5 @@ public class DataSourceStore extends StoreBase implements Store {
         super.stopInternal();
 
         this.dataSource = null;
-    }
-
-    /**
-     * Initialize dataSource if it hasn't been initialized yet.
-     *
-     * @return <code>DataSource</code>
-     */
-    protected DataSource getDataSource() {
-        if (dataSource == null) {
-            Context context;
-            try {
-                if (localDataSource) {
-                    context = ContextBindings.getClassLoader();
-                    context = (Context) context.lookup("comp/env");
-                } else {
-                    context = getServer().getGlobalNamingContext();
-                }
-                this.dataSource = (DataSource) context.lookup(this.dataSourceName);
-            } catch (NamingException e) {
-                manager.getContainer().getLogger().error(sm.getString(getStoreName() + ".wrongDataSource", dataSourceName), e);
-            }
-        }
-
-        return dataSource;
-    }
-
-    /**
-     * Return the Server object that is the ultimate parent for the container
-     * with which this Realm is associated. If the server cannot be found (eg
-     * because the container hierarchy is not complete), <code>null</code> is
-     * returned.
-     */
-    protected Server getServer() {
-        Container c = manager.getContainer();
-        if (c instanceof Context) {
-            c = c.getParent();
-        }
-        if (c instanceof Host) {
-            c = c.getParent();
-        }
-        if (c instanceof Engine) {
-            Service s = ((Engine) c).getService();
-            if (s != null) {
-                return s.getServer();
-            }
-        }
-        return null;
     }
 }
