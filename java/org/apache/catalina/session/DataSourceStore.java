@@ -46,6 +46,12 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 
+/**
+ * Implementation of the <code>Store</code> interface that stores
+ * serialized session objects in a database using a specified data source.  Sessions that are
+ * saved are still subject to being expired based on inactivity.
+ * Note that this implementation does not synchronize access to a connection.
+ */
 public class DataSourceStore extends StoreBase implements Store {
     /**
      * The descriptive information about this implementation.
@@ -151,7 +157,6 @@ public class DataSourceStore extends StoreBase implements Store {
      */
     protected String preparedLoadSql = null;
 
-
     // ------------------------------------------------------------- Properties
 
     /**
@@ -201,7 +206,6 @@ public class DataSourceStore extends StoreBase implements Store {
     public String getStoreName() {
         return (storeName);
     }
-
 
     /**
      * Set the table for this Store.
@@ -344,10 +348,24 @@ public class DataSourceStore extends StoreBase implements Store {
     }
 
     /**
-     * Return if the datasource will be looked up in the webapp JNDI Context.
+     * Set the JNDI name of a DataSource-factory to use for db access
+     *
+     * @param dataSourceName The JNDI name of the DataSource-factory
      */
-    public boolean getLocalDataSource() {
-        return localDataSource;
+    public void setDataSourceName(String dataSourceName) {
+        if (dataSourceName == null || "".equals(dataSourceName.trim())) {
+            manager.getContainer().getLogger().warn(
+                    sm.getString(getStoreName() + ".missingDataSourceName"));
+            return;
+        }
+        this.dataSourceName = dataSourceName;
+    }
+
+    /**
+     * Return the name of the JNDI DataSource-factory
+     */
+    public String getDataSourceName() {
+        return this.dataSourceName;
     }
 
     /**
@@ -358,6 +376,13 @@ public class DataSourceStore extends StoreBase implements Store {
      */
     public void setLocalDataSource(boolean localDataSource) {
         this.localDataSource = localDataSource;
+    }
+
+    /**
+     * Return if the datasource will be looked up in the webapp JNDI Context.
+     */
+    public boolean getLocalDataSource() {
+        return localDataSource;
     }
 
     // --------------------------------------------------------- Public Methods
@@ -381,7 +406,6 @@ public class DataSourceStore extends StoreBase implements Store {
             preparedKeys = _conn.prepareStatement(preparedKeysSql);
             preparedKeys.setString(1, getName());
             rst = preparedKeys.executeQuery();
-
             ArrayList<String> tmpkeys = new ArrayList<String>();
             if (rst != null) {
                 while (rst.next()) {
@@ -422,7 +446,6 @@ public class DataSourceStore extends StoreBase implements Store {
         PreparedStatement preparedSize = null;
 
         Connection _conn = getConnection();
-
         if (_conn == null) {
             return (size);
         }
@@ -529,7 +552,7 @@ public class DataSourceStore extends StoreBase implements Store {
                 try {
                     ois.close();
                 } catch (IOException e) {
-                    ;
+                    // Ignore
                 }
             }
             close(_conn);
@@ -547,13 +570,32 @@ public class DataSourceStore extends StoreBase implements Store {
      */
     @Override
     public void remove(String id) {
-        PreparedStatement preparedRemove = null;
-
         Connection _conn = getConnection();
-
         if (_conn == null) {
             return;
         }
+
+        try {
+            remove(id, _conn);
+        } finally {
+            close(_conn);
+        }
+
+        if (manager.getContainer().getLogger().isDebugEnabled()) {
+            manager.getContainer().getLogger().debug(sm.getString(getStoreName() + ".removing", id, sessionTable));
+        }
+    }
+
+    /**
+     * Remove the Session with the specified session identifier from
+     * this Store, if present.  If no such Session is present, this method
+     * takes no action.
+     *
+     * @param id    Session identifier of the Session to be removed
+     * @param _conn open connection to be used
+     */
+    private void remove(String id, Connection _conn) {
+        PreparedStatement preparedRemove = null;
 
         try {
             preparedRemove = _conn.prepareStatement(preparedRemoveSql);
@@ -567,15 +609,9 @@ public class DataSourceStore extends StoreBase implements Store {
                 if (preparedRemove != null) {
                     preparedRemove.close();
                 }
-
             } catch (SQLException e) {
                 manager.getContainer().getLogger().error(sm.getString(getStoreName() + ".SQLException", e));
             }
-            close(_conn);
-        }
-
-        if (manager.getContainer().getLogger().isDebugEnabled()) {
-            manager.getContainer().getLogger().debug(sm.getString(getStoreName() + ".removing", id, sessionTable));
         }
     }
 
@@ -628,12 +664,12 @@ public class DataSourceStore extends StoreBase implements Store {
             return;
         }
 
-        // If sessions already exist in DB, remove and insert again.
-        // TODO:
-        // * Check if ID exists in database and if so use UPDATE.
-        remove(session.getIdInternal());
-
         try {
+            // If sessions already exist in DB, remove and insert again.
+            // TODO:
+            // * Check if ID exists in database and if so use UPDATE.
+            remove(session.getIdInternal(), _conn);
+
             bos = new ByteArrayOutputStream();
             oos = new ObjectOutputStream(new BufferedOutputStream(bos));
 
@@ -660,10 +696,10 @@ public class DataSourceStore extends StoreBase implements Store {
                 if (preparedSave != null) {
                     preparedSave.close();
                 }
-
             } catch (SQLException e) {
                 manager.getContainer().getLogger().error(sm.getString(getStoreName() + ".SQLException", e));
             }
+
             if (oos != null) {
                 oos.close();
             }
@@ -703,22 +739,10 @@ public class DataSourceStore extends StoreBase implements Store {
         return conn;
     }
 
-    public String getDataSourceName() {
-        return dataSourceName;
-    }
-
-    public void setDataSourceName(String dataSourceName) {
-        if (dataSourceName == null || "".equals(dataSourceName.trim())) {
-            manager.getContainer().getLogger().warn(sm.getString(getStoreName() + ".noDataSourceName"));
-            return;
-        }
-        this.dataSourceName = dataSourceName;
-    }
-
     /**
-     * Release the connection
+     * Close the specified database connection.
      *
-     * @param conn The connection to be released
+     * @param conn The connection to be closed
      */
     protected void close(Connection conn) {
         // Commit if not auto committed
@@ -727,22 +751,25 @@ public class DataSourceStore extends StoreBase implements Store {
                 conn.commit();
             }
         } catch (SQLException e) {
-            manager.getContainer().getLogger().error(sm.getString(getStoreName() + ".commitBeforeClose"), e);
+            manager.getContainer().getLogger().error(sm.getString(getStoreName() + ".commitSQLException"), e);
         }
 
         try {
             conn.close();
         } catch (SQLException e) {
-            manager.getContainer().getLogger().error(sm.getString(getStoreName() + ".close", e.toString()));
+            manager.getContainer().getLogger().error(sm.getString(getStoreName() + ".close", e.toString())); // Just log it here
         }
     }
 
     /**
-     * Called once when this Store is first started.
+     * Start this component and implement the requirements
+     * of {@link org.apache.catalina.util.LifecycleBase#startInternal()}.
+     *
+     * @throws LifecycleException if this component detects a fatal error
+     *                            that prevents this component from being used
      */
     @Override
     protected synchronized void startInternal() throws LifecycleException {
-
         // initialize DataSource
         this.dataSource = getDataSource();
 
@@ -764,22 +791,28 @@ public class DataSourceStore extends StoreBase implements Store {
         preparedRemoveSql = "DELETE FROM " + sessionTable + " WHERE " + sessionIdCol + " = ?  AND " + sessionAppCol + " = ?";
 
         // Create the load PreparedStatement string
-        preparedLoadSql = "SELECT " + sessionIdCol + ", " + sessionDataCol + " FROM " + sessionTable +
-                " WHERE " + sessionIdCol + " = ? AND " + sessionAppCol + " = ?";
+        preparedLoadSql = "SELECT " + sessionIdCol + ", " + sessionDataCol + " FROM " + sessionTable
+                + " WHERE " + sessionIdCol + " = ? AND " + sessionAppCol + " = ?";
+
+        super.startInternal();
     }
 
     /**
-     * Called once when this Store is stopping.
+     * Stop this component and implement the requirements
+     * of {@link org.apache.catalina.util.LifecycleBase#stopInternal()}.
+     *
+     * @throws LifecycleException if this component detects a fatal error
+     *                            that prevents this component from being used
      */
     @Override
     protected synchronized void stopInternal() throws LifecycleException {
+        super.stopInternal();
 
         this.dataSource = null;
     }
 
     /**
      * Initialize dataSource if it hasn't been initialized yet.
-     * Do not synchronize as race condition is harmless here (there is only one instance of data source on server).
      *
      * @return <code>DataSource</code>
      */
@@ -817,7 +850,7 @@ public class DataSourceStore extends StoreBase implements Store {
             c = c.getParent();
         }
         if (c instanceof Engine) {
-            Service s = ((Engine)c).getService();
+            Service s = ((Engine) c).getService();
             if (s != null) {
                 return s.getServer();
             }
