@@ -48,7 +48,7 @@ import java.util.ArrayList;
  * saved are still subject to being expired based on inactivity.
  * Note that this implementation does not synchronize access to a connection.
  *
- * @author Viktor Khoroshiko
+ * @author Viktor Khoroshko
  * @version $Id$
  */
 public class DataSourceStore extends StoreBase implements Store {
