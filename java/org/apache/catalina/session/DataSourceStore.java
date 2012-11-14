@@ -767,8 +767,6 @@ public class DataSourceStore extends StoreBase implements Store {
      */
     @Override
     protected synchronized void startInternal() throws LifecycleException {
-        super.startInternal();
-
         // initialize DataSource
         this.dataSource = getDataSource();
 
@@ -792,6 +790,8 @@ public class DataSourceStore extends StoreBase implements Store {
         // Create the load PreparedStatement string
         preparedLoadSql = "SELECT " + sessionIdCol + ", " + sessionDataCol + " FROM " + sessionTable
                 + " WHERE " + sessionIdCol + " = ? AND " + sessionAppCol + " = ?";
+
+        super.startInternal();
     }
 
     /**
